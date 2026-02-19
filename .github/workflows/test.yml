@@ -7,6 +7,7 @@ on:
 
 jobs:
   jonathan-server-wilson-client:
+    name: Jonathan's server with Wilson's client
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +45,7 @@ jobs:
           files: "./clientStuff/server.txt"
 
   wilson-server-jonathan-client:
+    name: Wilson's server with Jonathan's client
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
