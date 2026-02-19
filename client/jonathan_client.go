@@ -34,7 +34,7 @@ func put(url, filePath string) (bool, string) {
 
 	md5 := md5.New()
 
-	file, _ := os.Open(fileName)
+	file, _ := os.Open(filePath)
 	w := io.MultiWriter(msgHandler, md5)
 	io.CopyN(w, file, fileSize)
 	file.Close()
