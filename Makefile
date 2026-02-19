@@ -20,4 +20,4 @@ bin/wilson/server: server/wilson_server.go messages/message_handler.go util/util
 	go build -o bin/wilson/server server/wilson_server.go
 
 clean:
-	rm -rf bin/{client,server}
+	rm -rf bin/{client,server,jonathan,wilson}
