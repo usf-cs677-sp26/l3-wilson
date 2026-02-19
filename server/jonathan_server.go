@@ -8,17 +8,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"path"
 )
 
 func handleStorage(msgHandler *messages.MessageHandler, request *messages.StorageRequest) {
-	fileStat, err := os.Stat(request.FileName)
-	if err != nil {
-		msgHandler.SendResponse(false, err.Error())
-		msgHandler.Close()
-		return
-	}
-
-	fileName := fileStat.Name()
+	fileName := path.Base(request.GetFileName())
 
 	log.Println("Attempting to store", fileName)
 	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
