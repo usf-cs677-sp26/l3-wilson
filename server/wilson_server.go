@@ -11,12 +11,13 @@ import (
 	"os"
 )
 
-func handleStorage(msgHandler *messages.MessageHandler, request *messages.StorageRequest) {
+func handleStorage(msgHandler *messages.MessageHandler, request *messages.StorageRequest) error {
 	log.Println("Attempting to store", request.FileName)
+
 	file, err := os.OpenFile(request.FileName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
 	if err != nil {
 		msgHandler.SendResponse(false, err.Error())
-		return
+		return err
 	}
 
 	msgHandler.SendResponse(true, "Ready for data")
@@ -30,35 +31,36 @@ func handleStorage(msgHandler *messages.MessageHandler, request *messages.Storag
 
 	clientCheckMsg, err := msgHandler.Receive()
 	if err != nil {
-		log.Println("Error receiving checksum:", err)
-		return
+		os.Remove(request.FileName)
+		return fmt.Errorf("error receiving checksum: %w", err)
 	}
 	clientCheck := clientCheckMsg.GetChecksum().Checksum
 
-	if util.VerifyChecksum(serverCheck, clientCheck) {
-		log.Println("Successfully stored file.")
-		msgHandler.SendResponse(true, "File stored successfully")
-	} else {
-		log.Println("FAILED to store file. Invalid checksum.")
+	if !util.VerifyChecksum(serverCheck, clientCheck) {
+		os.Remove(request.FileName)
 		msgHandler.SendResponse(false, "Checksum mismatch")
+		return fmt.Errorf("checksum mismatch for %s", request.FileName)
 	}
+
+	log.Println("Successfully stored", request.FileName)
+	msgHandler.SendResponse(true, "File stored successfully")
+	return nil
 }
 
-func handleRetrieval(msgHandler *messages.MessageHandler, request *messages.RetrievalRequest) {
+func handleRetrieval(msgHandler *messages.MessageHandler, request *messages.RetrievalRequest) error {
 	log.Println("Attempting to retrieve", request.FileName)
 
 	info, err := os.Stat(request.FileName)
 	if err != nil {
 		msgHandler.SendRetrievalResponse(false, err.Error(), 0)
-		return
+		return err
 	}
 
 	msgHandler.SendRetrievalResponse(true, "Ready to send", uint64(info.Size()))
 
 	file, err := os.Open(request.FileName)
 	if err != nil {
-		log.Println("Error opening file:", err)
-		return
+		return fmt.Errorf("error opening file: %w", err)
 	}
 
 	md5Hash := md5.New()
@@ -68,6 +70,7 @@ func handleRetrieval(msgHandler *messages.MessageHandler, request *messages.Retr
 
 	checksum := md5Hash.Sum(nil)
 	msgHandler.SendChecksumVerification(checksum)
+	return nil
 }
 
 func handleClient(msgHandler *messages.MessageHandler) {
@@ -82,9 +85,15 @@ func handleClient(msgHandler *messages.MessageHandler) {
 
 		switch msg := wrapper.Msg.(type) {
 		case *messages.Wrapper_StorageReq:
-			handleStorage(msgHandler, msg.StorageReq)
+			if err := handleStorage(msgHandler, msg.StorageReq); err != nil {
+				log.Println(err)
+				return
+			}
 		case *messages.Wrapper_RetrievalReq:
-			handleRetrieval(msgHandler, msg.RetrievalReq)
+			if err := handleRetrieval(msgHandler, msg.RetrievalReq); err != nil {
+				log.Println(err)
+				return
+			}
 		case nil:
 			log.Println("Received an empty message, terminating client")
 			return
@@ -103,7 +112,7 @@ func main() {
 	port := os.Args[1]
 	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		log.Fatalln(err.Error())
+		log.Fatalln(err)
 	}
 	defer listener.Close()
 
