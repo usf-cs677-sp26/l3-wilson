@@ -12,22 +12,22 @@ import (
 	"strings"
 )
 
-func put(msgHandler *messages.MessageHandler, fileName string) int {
+func put(msgHandler *messages.MessageHandler, fileName string) error {
 	fmt.Println("PUT", fileName)
 
 	info, err := os.Stat(fileName)
 	if err != nil {
-		log.Fatalln(err)
+		return err
 	}
 
 	msgHandler.SendStorageRequest(fileName, uint64(info.Size()))
-	if ok, _ := msgHandler.ReceiveResponse(); !ok {
-		return 1
+	if ok, msg := msgHandler.ReceiveResponse(); !ok {
+		return fmt.Errorf("server rejected storage request: %s", msg)
 	}
 
 	file, err := os.Open(fileName)
 	if err != nil {
-		log.Fatalln(err)
+		return err
 	}
 
 	md5Hash := md5.New()
@@ -38,25 +38,28 @@ func put(msgHandler *messages.MessageHandler, fileName string) int {
 	checksum := md5Hash.Sum(nil)
 	msgHandler.SendChecksumVerification(checksum)
 
+	if ok, msg := msgHandler.ReceiveResponse(); !ok {
+		return fmt.Errorf("checksum mismatch: %s", msg)
+	}
+
 	fmt.Println("Storage complete!")
-	return 0
+	return nil
 }
 
-func get(msgHandler *messages.MessageHandler, fileName string) int {
+func get(msgHandler *messages.MessageHandler, fileName string) error {
 	fmt.Println("GET", fileName)
 
 	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
 	if err != nil {
-		log.Println(err)
-		return 1
+		return err
 	}
 
 	msgHandler.SendRetrievalRequest(fileName)
-	ok, _, size := msgHandler.ReceiveRetrievalResponse()
+	ok, msg, size := msgHandler.ReceiveRetrievalResponse()
 	if !ok {
 		file.Close()
 		os.Remove(fileName)
-		return 1
+		return fmt.Errorf("server rejected retrieval request: %s", msg)
 	}
 
 	md5Hash := md5.New()
@@ -67,19 +70,18 @@ func get(msgHandler *messages.MessageHandler, fileName string) int {
 	clientCheck := md5Hash.Sum(nil)
 	checkMsg, err := msgHandler.Receive()
 	if err != nil {
-		log.Println("Error receiving checksum:", err)
-		return 1
+		os.Remove(fileName)
+		return fmt.Errorf("error receiving checksum: %w", err)
 	}
 	serverCheck := checkMsg.GetChecksum().Checksum
 
-	if util.VerifyChecksum(serverCheck, clientCheck) {
-		log.Println("Successfully retrieved file.")
-	} else {
-		log.Println("FAILED to retrieve file. Invalid checksum.")
-		return 1
+	if !util.VerifyChecksum(serverCheck, clientCheck) {
+		os.Remove(fileName)
+		return fmt.Errorf("checksum mismatch — file corrupted")
 	}
 
-	return 0
+	log.Println("Successfully retrieved file.")
+	return nil
 }
 
 func main() {
@@ -106,14 +108,17 @@ func main() {
 
 	conn, err := net.Dial("tcp", host)
 	if err != nil {
-		log.Fatalln(err.Error())
+		log.Fatalln(err)
 	}
 	msgHandler := messages.NewMessageHandler(conn)
 	defer msgHandler.Close()
 
 	if action == "put" {
-		os.Exit(put(msgHandler, fileName))
+		err = put(msgHandler, fileName)
 	} else {
-		os.Exit(get(msgHandler, fileName))
+		err = get(msgHandler, fileName)
+	}
+	if err != nil {
+		log.Fatalln(err)
 	}
 }
